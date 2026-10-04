@@ -201,7 +201,7 @@ app.get("/api/owners/:id/dogs", async (req, res) => {
 // POST /api/owners
 app.post("/api/owners", async (req, res) => {
     try {
-        const validation = OwnerSchema.safeParse(req.body ?? {})
+        const validation = OwnerSchema.safeParse(req.body ?? {}) // "Field 'name' is required" : "Invalid 'name': must be a string" })"
 
         if (!validation.success) {
             const first = validation.error.issues[0]?.message
@@ -232,7 +232,7 @@ app.put("/api/owners/:id", async (req, res) => {
             return res.status(400).json({ error: params.error.issues[0]?.message, data: null })
         }
 
-        const body = OwnerSchema.required().safeParse(req.body ?? {})
+        const body = OwnerSchema.required().safeParse(req.body ?? {}) // Field 'name' is required" : "Invalid 'name': must be a string" })
         if (!body.success) {
             return res.status(400).json({ error: body.error.issues[0]?.message, data: null })
         }
@@ -260,7 +260,7 @@ app.put("/api/owners/:id", async (req, res) => {
     }
 })
 
-// DELETE /api/owners/:id
+/// DELETE /api/owners/:id
 app.delete("/api/owners/:id", async (req, res) => {
     try {
         const params = ParamsSchema.safeParse(req.params)
@@ -286,6 +286,15 @@ app.delete("/api/owners/:id", async (req, res) => {
         return res.status(500).json({ data: null, error: "Internal server error" })
     }
 })
+
+
+
+
+
+
+
+
+
 
 // ## Runner ## 
 app.listen(port, ()=>{
