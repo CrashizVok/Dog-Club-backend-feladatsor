@@ -4,6 +4,7 @@ const knex = require("knex")
 const z = require("zod")
 const app = express()
 const port = 3000
+app.use(express.json())
 
 // DATABASE 
 const db = knex({
@@ -46,6 +47,35 @@ const DogsQuerySchema = z.object({
     order: z.enum(["asc", "desc"], { error: "Invalid 'order': must be asc or desc" })
         .default("asc")
 })
+
+const OwnerSchema = z.object({
+    name: z.string({ error: (err) => err.input === undefined ? "Field 'name' is required" : "Invalid 'name': must be a string" })
+        .trim()
+        .min(1, "Invalid 'name': must be 1-100 characters")
+        .max(100, "Invalid 'name': must be 1-100 characters"),
+    email: z.email({ error: "Invalid 'email': must be a valid email" }).optional(),
+    phone: z.string({ error: "Invalid 'phone': must be a string" })
+        .max(20, "Invalid 'phone': must be at most 20 characters").optional(),
+    city: z.string({ error: "Invalid 'city': must be a string" })
+        .max(80, "Invalid 'city': must be at most 80 characters").optional()
+})
+
+
+const AllDogsQuerySchema = DogsQuerySchema.extend({
+    breed: z.string().optional(),
+    search: QuerySchema.shape.search,
+    owner_id: z.coerce.number({ error: "Invalid 'owner_id': must be a positive integer" })
+        .int("Invalid 'owner_id': must be a positive integer")
+        .positive("Invalid 'owner_id': must be a positive integer").optional(),
+    has_owner: z.enum(["true", "false"], { error: "Invalid 'has_owner': must be true or false" }).optional(),
+    min_weight: z.coerce.number({ error: "Invalid 'min_weight': must be a number" }).optional(),
+    max_weight: z.coerce.number({ error: "Invalid 'max_weight': must be a number" }).optional(),
+    sort: z.enum(["name", "born_at", "weight_kg"], { error: "Invalid 'sort': must be name, born_at or weight_kg" })
+        .default("name"),
+    limit: QuerySchema.shape.limit,
+    offset: QuerySchema.shape.offset
+})
+
 
 // GET /health
 app.get("/health", (req,res) =>{
@@ -167,6 +197,95 @@ app.get("/api/owners/:id/dogs", async (req, res) => {
     }
 })
 
+
+// POST /api/owners
+app.post("/api/owners", async (req, res) => {
+    try {
+        const validation = OwnerSchema.safeParse(req.body ?? {})
+
+        if (!validation.success) {
+            const first = validation.error.issues[0]?.message
+            return res.status(400).json({ error: first, data: null })
+        }
+
+        const [id] = await db("owners").insert(validation.data)
+        const owner = await db("owners").select("id", "name", "email", "phone", "city", "created_at")
+            .where("id", id)
+            .first()
+
+        return res.status(201).json({ data: owner, error: null })
+    }
+    catch (error) {
+        if (error.code === "ER_DUP_ENTRY") {
+            return res.status(409).json({ error: "Email already in use", data: null })
+        }
+        log("Database error: ", error)
+        return res.status(500).json({ data: null, error: "Internal server error" })
+    }
+})
+
+// PUT /api/owners/:id
+app.put("/api/owners/:id", async (req, res) => {
+    try {
+        const params = ParamsSchema.safeParse(req.params)
+        if (!params.success) {
+            return res.status(400).json({ error: params.error.issues[0]?.message, data: null })
+        }
+
+        const body = OwnerSchema.required().safeParse(req.body ?? {})
+        if (!body.success) {
+            return res.status(400).json({ error: body.error.issues[0]?.message, data: null })
+        }
+
+        const { id } = params.data
+
+        const affected = await db("owners").where("id", id).update(body.data)
+
+        if (affected === 0) {
+            return res.status(404).json({ error: `Owner with id ${id} not found`, data: null })
+        }
+
+        const owner = await db("owners").select("id", "name", "email", "phone", "city", "created_at")
+            .where("id", id)
+            .first()
+
+        return res.status(200).json({ data: owner, error: null })
+    }
+    catch (error) {
+        if (error.code === "ER_DUP_ENTRY") {
+            return res.status(409).json({ error: "Email already in use", data: null })
+        }
+        log("Database error: ", error)
+        return res.status(500).json({ data: null, error: "Internal server error" })
+    }
+})
+
+// DELETE /api/owners/:id
+app.delete("/api/owners/:id", async (req, res) => {
+    try {
+        const params = ParamsSchema.safeParse(req.params)
+        if (!params.success) {
+            return res.status(400).json({ error: params.error.issues[0]?.message, data: null })
+        }
+
+        const { id } = params.data
+
+        const countRes = await db("dogs").where("owner_id", id).count({ count: "*" }).first()
+        const dogsOrphaned = Number.parseInt(countRes.count, 10)
+
+        const deleted = await db("owners").where("id", id).del()
+
+        if (deleted === 0) {
+            return res.status(404).json({ error: `Owner with id ${id} not found`, data: null })
+        }
+
+        return res.status(200).json({ data: { id, deleted: true, dogs_orphaned: dogsOrphaned }, error: null })
+    }
+    catch (error) {
+        log("Database error: ", error)
+        return res.status(500).json({ data: null, error: "Internal server error" })
+    }
+})
 
 // ## Runner ## 
 app.listen(port, ()=>{
