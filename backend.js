@@ -39,6 +39,14 @@ const ParamsSchema = z.object({
         .positive("Invalid 'id': must be a positive integer")
 })
 
+const DogsQuerySchema = z.object({
+    is_girl: z.enum(["0", "1"], { error: "Invalid 'is_girl': must be 0 or 1" }).optional(),
+    sort: z.enum(["name", "born_at", "weight_kg"], { error: "Invalid 'sort': must be name, born_at or weight_kg" })
+        .default("born_at"),
+    order: z.enum(["asc", "desc"], { error: "Invalid 'order': must be asc or desc" })
+        .default("asc")
+})
+
 // GET /health
 app.get("/health", (req,res) =>{
     return res.status(200).json({status: "Healthy"})
@@ -112,7 +120,52 @@ app.get("/api/owners/:id", async (req,res) =>{
     }
 })
 
+//GET /api/owners/:id/dogs
+app.get("/api/owners/:id/dogs", async (req, res) => {
+    try {
+        const params = ParamsSchema.safeParse(req.params)
+        if (!params.success) {
+            return res.status(400).json({ error: params.error.issues[0]?.message, data: null })
+        }
 
+        const query = DogsQuerySchema.safeParse(req.query)
+        if (!query.success) {
+            return res.status(400).json({ error: query.error.issues[0]?.message, data: null })
+        }
+
+        const { id } = params.data
+        const { is_girl, sort, order } = query.data
+
+        const owner = await db("owners").select("id", "name", "city").where("id", id).first()
+
+        if (!owner) {
+            return res.status(404).json({ error: `Owner with id ${id} not found`, data: null })
+        }
+
+        let dogsQuery = db("dogs")
+            .select(
+                "id", "name", "is_girl", "breed", "weight_kg", "color",
+                db.raw("DATE_FORMAT(born_at, '%Y-%m-%d') AS born_at"), // 
+                db.raw("DATE_FORMAT(adopted_at, '%Y-%m-%d') AS adopted_at")
+            )
+            .where("owner_id", id)
+
+        if (is_girl !== undefined) dogsQuery = dogsQuery.where("is_girl", Number(is_girl))
+
+        const rows = await dogsQuery.orderBy(sort, order).orderBy("id")
+
+        const dogs = rows.map(dog => ({
+            ...dog,
+            is_girl: Boolean(dog.is_girl),
+            weight_kg: dog.weight_kg === null ? null : Number(dog.weight_kg)
+        }))
+
+        return res.status(200).json({ data: { owner, dogs }, error: null })
+    } catch (error) {
+        log("Database error: ", error)
+        return res.status(500).json({ data: null, error: "Internal server error" })
+    }
+})
 
 
 // ## Runner ## 
